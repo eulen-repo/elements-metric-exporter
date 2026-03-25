@@ -1,0 +1,110 @@
+# Copyright 2026 Eulen
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag & Release
+    runs-on: ubuntu-latest
+    # Skip if the commit was made by the release workflow itself
+    if: "!startsWith(github.event.head_commit.message, 'chore: release')"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for git describe
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Determine next version
+        id: version
+        run: |
+          # Get the latest semver tag, default to v0.0.0 if none exists
+          LATEST=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          if [ -z "$LATEST" ]; then
+            LATEST="v0.0.0"
+          fi
+
+          # Parse major.minor.patch
+          BASE=${LATEST#v}
+          MAJOR=$(echo "$BASE" | cut -d. -f1)
+          MINOR=$(echo "$BASE" | cut -d. -f2)
+          PATCH=$(echo "$BASE" | cut -d. -f3)
+
+          # Check commit messages since last tag for bump hints
+          # [minor] or feat: → bump minor, reset patch
+          # [major] or breaking: → bump major, reset minor+patch
+          # Default → bump patch
+          if [ "$LATEST" = "v0.0.0" ]; then
+            COMMITS=$(git log --oneline)
+          else
+            COMMITS=$(git log "${LATEST}..HEAD" --oneline)
+          fi
+
+          if echo "$COMMITS" | grep -qiE '\[major\]|breaking:'; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif echo "$COMMITS" | grep -qiE '\[minor\]|feat:'; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEXT="v${MAJOR}.${MINOR}.${PATCH}"
+
+          # If no tags exist yet, force v0.1.0 as the first release
+          if [ "$LATEST" = "v0.0.0" ]; then
+            NEXT="v0.1.0"
+          fi
+
+          echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Next version: $NEXT (previous: $LATEST)"
+
+      - name: Build linux binary
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          GOOS=linux GOARCH=amd64 go build \
+            -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT::7} -X main.date=${DATE}" \
+            -o elements-exporter-linux .
+
+      - name: Create tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            elements-exporter-linux \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes

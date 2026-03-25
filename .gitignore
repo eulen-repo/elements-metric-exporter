@@ -1,0 +1,12 @@
+# Build artefacts
+elements-exporter
+elements-exporter-linux
+
+# Test artefacts
+coverage.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
