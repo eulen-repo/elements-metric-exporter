@@ -1,0 +1,16 @@
+.git
+.github
+.idea
+.vscode
+elements-exporter
+elements-exporter-linux
+coverage.out
+*.swp
+*~
+README.md
+LICENSE
+NOTICE
+Makefile
+Dockerfile
+.dockerignore
+.gitignore

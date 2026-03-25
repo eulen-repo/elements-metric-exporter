@@ -120,6 +120,8 @@ Requires Go 1.23+.
 ```bash
 make build          # Build for host platform
 make build-linux    # Cross-compile for linux/amd64
+make docker         # Build Docker image
+make docker-push    # Push Docker image to registry
 make test           # Run unit tests
 make test-race      # Run tests with race detector
 make test-cover     # Run tests with coverage report
@@ -136,6 +138,27 @@ The build embeds version info via `-ldflags`. If the repository has a git tag (e
 ```bash
 make build VERSION=v1.0.0
 ```
+
+## Docker
+
+```bash
+# Build the image
+make docker
+
+# Or with a custom image name and version
+make docker IMAGE=ghcr.io/eulen/elements-exporter VERSION=v0.1.0
+
+# Run the container
+docker run -d \
+  --name elements-exporter \
+  -p 9101:9101 \
+  -e ELEMENTS_RPC_URL=http://elements-node:7041 \
+  -e ELEMENTS_RPC_USER=admin \
+  -e ELEMENTS_RPC_PASSWORD=secret \
+  elements-exporter:latest
+```
+
+The image is based on Alpine Linux (~15 MB), runs as a non-root user, and contains only the static binary plus CA certificates.
 
 ## CI/CD
 

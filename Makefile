@@ -20,6 +20,7 @@ MODULE   := $(shell go list -m)
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT   := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE     := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+IMAGE    ?= elements-exporter
 
 GOFLAGS  ?=
 LDFLAGS  := -s -w \
@@ -30,7 +31,7 @@ LDFLAGS  := -s -w \
 # Default: build for the host platform
 .DEFAULT_GOAL := build
 
-.PHONY: all build build-linux test test-race test-cover lint vet fmt clean check help
+.PHONY: all build build-linux docker docker-push test test-race test-cover lint vet fmt clean check help
 
 all: check build ## Run checks and build
 
@@ -39,6 +40,19 @@ build: ## Build binary for the host platform
 
 build-linux: ## Cross-compile for linux/amd64
 	GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags='$(LDFLAGS)' -o $(BINARY)-linux .
+
+docker: ## Build Docker image
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg DATE=$(DATE) \
+		-t $(IMAGE):$(VERSION) \
+		-t $(IMAGE):latest \
+		.
+
+docker-push: ## Push Docker image to registry
+	docker push $(IMAGE):$(VERSION)
+	docker push $(IMAGE):latest
 
 test: ## Run unit tests
 	go test $(GOFLAGS) -count=1 ./...
