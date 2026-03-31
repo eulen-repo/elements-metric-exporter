@@ -83,15 +83,22 @@ jobs:
           echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
           echo "Next version: $NEXT (previous: $LATEST)"
 
-      - name: Build linux binary
+      - name: Build binaries for all platforms
         env:
           VERSION: ${{ steps.version.outputs.tag }}
           COMMIT: ${{ github.sha }}
         run: |
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          GOOS=linux GOARCH=amd64 go build \
-            -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT::7} -X main.date=${DATE}" \
-            -o elements-exporter-linux .
+          LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT::7} -X main.date=${DATE}"
+          for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os="${platform%/*}"
+            arch="${platform#*/}"
+            ext=""
+            if [ "$os" = "windows" ]; then ext=".exe"; fi
+            output="elements-exporter-${os}-${arch}${ext}"
+            echo "Building ${output} ..."
+            GOOS=$os GOARCH=$arch go build -ldflags="$LDFLAGS" -o "$output" .
+          done
 
       - name: Create tag
         run: |
@@ -105,6 +112,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
-            elements-exporter-linux \
+            elements-exporter-linux-amd64 \
+            elements-exporter-linux-arm64 \
+            elements-exporter-darwin-amd64 \
+            elements-exporter-darwin-arm64 \
+            elements-exporter-windows-amd64.exe \
+            elements-exporter-windows-arm64.exe \
             --title "${{ steps.version.outputs.tag }}" \
             --generate-notes

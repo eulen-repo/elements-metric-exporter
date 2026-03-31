@@ -31,15 +31,25 @@ LDFLAGS  := -s -w \
 # Default: build for the host platform
 .DEFAULT_GOAL := build
 
-.PHONY: all build build-linux docker docker-push test test-race test-cover lint vet fmt clean check help
+.PHONY: all build build-all docker docker-push test test-race test-cover lint vet fmt clean check help
+
+PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
 all: check build ## Run checks and build
 
 build: ## Build binary for the host platform
 	go build $(GOFLAGS) -ldflags='$(LDFLAGS)' -o $(BINARY) .
 
-build-linux: ## Cross-compile for linux/amd64
-	GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags='$(LDFLAGS)' -o $(BINARY)-linux .
+build-all: ## Cross-compile for all supported platforms
+	@for platform in $(PLATFORMS); do \
+		os=$${platform%/*}; \
+		arch=$${platform#*/}; \
+		ext=""; \
+		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
+		output=$(BINARY)-$${os}-$${arch}$${ext}; \
+		echo "Building $$output ..."; \
+		GOOS=$$os GOARCH=$$arch go build $(GOFLAGS) -ldflags='$(LDFLAGS)' -o $$output . || exit 1; \
+	done
 
 docker: ## Build Docker image
 	docker build \
@@ -77,7 +87,7 @@ fmt: ## Check formatting (exits non-zero if files need gofmt)
 check: fmt vet test ## Run fmt, vet, and tests
 
 clean: ## Remove build artefacts
-	rm -f $(BINARY) $(BINARY)-linux coverage.out
+	rm -f $(BINARY) $(BINARY)-linux-* $(BINARY)-darwin-* $(BINARY)-windows-* coverage.out
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
