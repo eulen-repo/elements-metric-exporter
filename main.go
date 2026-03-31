@@ -36,6 +36,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -49,16 +50,27 @@ var (
 )
 
 type config struct {
-	rpcURL      string
-	rpcUser     string
-	rpcPass     string
-	listenAddr  string
-	metricsPath string
-	showVersion bool
+	rpcURL       string
+	rpcUser      string
+	rpcPass      string
+	listenAddr   string
+	metricsPath  string
+	cacheRefresh time.Duration
+	cacheTTL     time.Duration
+	showVersion  bool
 }
 
 // envOrDefault returns the value of the environment variable named by key,
 // or fallback if the variable is not set or empty.
+func parseDurationOrDefault(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return fallback
+}
+
 func envOrDefault(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -87,6 +99,8 @@ func parseConfig() config {
 	flag.StringVar(&cfg.rpcPass, "rpc.password", envOrDefault("ELEMENTS_RPC_PASSWORD", os.Getenv("ELEMENTS_RPC_PASS")), "RPC password (env: ELEMENTS_RPC_PASSWORD)")
 	flag.StringVar(&cfg.listenAddr, "web.listen-address", envOrDefault("ELEMENTS_LISTEN_ADDRESS", ":9101"), "Address to serve metrics (env: ELEMENTS_LISTEN_ADDRESS)")
 	flag.StringVar(&cfg.metricsPath, "web.telemetry-path", envOrDefault("ELEMENTS_METRICS_PATH", "/metrics"), "Metrics endpoint path (env: ELEMENTS_METRICS_PATH)")
+	flag.DurationVar(&cfg.cacheRefresh, "cache.refresh", parseDurationOrDefault("ELEMENTS_CACHE_REFRESH", 15*time.Second), "Min pause between RPC calls per method (env: ELEMENTS_CACHE_REFRESH)")
+	flag.DurationVar(&cfg.cacheTTL, "cache.ttl", parseDurationOrDefault("ELEMENTS_CACHE_TTL", 60*time.Second), "Max age of cached data before metrics are omitted (env: ELEMENTS_CACHE_TTL)")
 	flag.Parse()
 
 	return cfg
@@ -105,7 +119,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	rpc := NewRPCClient(cfg.rpcURL, cfg.rpcUser, cfg.rpcPass)
+	rpc := NewRPCClientWithCache(cfg.rpcURL, cfg.rpcUser, cfg.rpcPass, cfg.cacheRefresh, cfg.cacheTTL)
 	col := NewElementsCollector(rpc)
 	prometheus.MustRegister(col)
 

@@ -139,7 +139,7 @@ func (e *ElementsCollector) collectBlockchain(ch chan<- prometheus.Metric) {
 	t := time.Now()
 	ok := 1.0
 
-	raw, err := e.rpc.Call("", "getblockchaininfo")
+	raw, err := e.rpc.CachedCall("", "getblockchaininfo")
 	if err != nil {
 		slog.Error("RPC call failed", "collector", "blockchain", "method", "getblockchaininfo", "error", err)
 		ok = 0
@@ -159,7 +159,7 @@ func (e *ElementsCollector) collectBlockchain(ch chan<- prometheus.Metric) {
 		}
 	}
 
-	rawNet, err := e.rpc.Call("", "getnetworkinfo")
+	rawNet, err := e.rpc.CachedCall("", "getnetworkinfo")
 	if err != nil {
 		slog.Error("RPC call failed", "collector", "blockchain", "method", "getnetworkinfo", "error", err)
 	} else {
@@ -179,7 +179,7 @@ func (e *ElementsCollector) collectMempool(ch chan<- prometheus.Metric) {
 	t := time.Now()
 	ok := 1.0
 
-	raw, err := e.rpc.Call("", "getmempoolinfo")
+	raw, err := e.rpc.CachedCall("", "getmempoolinfo")
 	if err != nil {
 		slog.Error("RPC call failed", "collector", "mempool", "method", "getmempoolinfo", "error", err)
 		ok = 0
@@ -205,7 +205,7 @@ func (e *ElementsCollector) collectWallets(ch chan<- prometheus.Metric) {
 	t := time.Now()
 	ok := 1.0
 
-	raw, err := e.rpc.Call("", "listwallets")
+	raw, err := e.rpc.CachedCall("", "listwallets")
 	if err != nil {
 		slog.Error("RPC call failed", "collector", "wallets", "method", "listwallets", "error", err)
 		scrapeHealth(ch, e.descScrapeOK, e.descScrapeSec, "wallets", 0, t)
@@ -230,7 +230,7 @@ func (e *ElementsCollector) collectWallets(ch chan<- prometheus.Metric) {
 }
 
 func (e *ElementsCollector) collectWallet(ch chan<- prometheus.Metric, wallet string) error {
-	raw, err := e.rpc.Call(wallet, "getbalances")
+	raw, err := e.rpc.CachedCall(wallet, "getbalances")
 	if err != nil {
 		return e.collectWalletLegacy(ch, wallet)
 	}
@@ -250,14 +250,14 @@ func (e *ElementsCollector) collectWallet(ch chan<- prometheus.Metric, wallet st
 		gaugeL(ch, e.descWalletImmatureBalance, v, wallet, asset)
 	}
 
-	if raw2, err := e.rpc.Call(wallet, "getwalletinfo"); err == nil {
+	if raw2, err := e.rpc.CachedCall(wallet, "getwalletinfo"); err == nil {
 		var wi walletInfo
 		if json.Unmarshal(raw2, &wi) == nil {
 			gaugeL(ch, e.descWalletTxCount, float64(wi.TxCount), wallet)
 		}
 	}
 
-	if raw3, err := e.rpc.Call(wallet, "listunspent", 1, 9999999, []any{}); err == nil {
+	if raw3, err := e.rpc.CachedCall(wallet, "listunspent", 1, 9999999, []any{}); err == nil {
 		var utxos []utxo
 		if json.Unmarshal(raw3, &utxos) == nil {
 			gaugeL(ch, e.descWalletUTXOCount, float64(len(utxos)), wallet)
@@ -277,7 +277,7 @@ func (e *ElementsCollector) collectWalletLegacy(ch chan<- prometheus.Metric, wal
 		ImmatureBalance    float64 `json:"immature_balance"`
 		TxCount            int64   `json:"txcount"`
 	}
-	raw, err := e.rpc.Call(wallet, "getwalletinfo")
+	raw, err := e.rpc.CachedCall(wallet, "getwalletinfo")
 	if err != nil {
 		return err
 	}
@@ -296,7 +296,7 @@ func (e *ElementsCollector) collectWalletLegacy(ch chan<- prometheus.Metric, wal
 // collectPendingTxs counts and sums the value of wallet transactions in the mempool
 // (confirmations == 0), grouped by direction (send / receive).
 func (e *ElementsCollector) collectPendingTxs(ch chan<- prometheus.Metric, wallet string) {
-	raw, err := e.rpc.Call(wallet, "listtransactions", "*", 500, 0, true)
+	raw, err := e.rpc.CachedCall(wallet, "listtransactions", "*", 500, 0, true)
 	if err != nil {
 		slog.Error("RPC call failed", "collector", "pending", "method", "listtransactions", "wallet", wallet, "error", err)
 		return

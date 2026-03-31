@@ -16,11 +16,13 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewRPCClient(t *testing.T) {
@@ -220,5 +222,144 @@ func TestRPCCall_EmptyBody(t *testing.T) {
 	_, err := c.Call("", "getinfo")
 	if err == nil {
 		t.Fatal("expected error for empty response body")
+	}
+}
+
+func TestCachedCall_ReturnsCachedWithinRefresh(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Write([]byte(fmt.Sprintf(`{"result":%d,"error":null}`, calls)))
+	}))
+	defer srv.Close()
+
+	c := NewRPCClientWithCache(srv.URL, "u", "p", 1*time.Second, 5*time.Second)
+
+	r1, err := c.CachedCall("w1", "listunspent", 1, 9999999)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+
+	r2, err := c.CachedCall("w1", "listunspent", 1, 9999999)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	if string(r1) != string(r2) {
+		t.Errorf("expected cached result %s, got %s", r1, r2)
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 RPC call, got %d", calls)
+	}
+}
+
+func TestCachedCall_RefreshesAfterRefreshInterval(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Write([]byte(fmt.Sprintf(`{"result":%d,"error":null}`, calls)))
+	}))
+	defer srv.Close()
+
+	c := NewRPCClientWithCache(srv.URL, "u", "p", 10*time.Millisecond, 5*time.Second)
+
+	_, err := c.CachedCall("w1", "listunspent")
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	r2, err := c.CachedCall("w1", "listunspent")
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	if string(r2) != "2" {
+		t.Errorf("expected refreshed result '2', got %s", r2)
+	}
+	if calls != 2 {
+		t.Errorf("expected 2 RPC calls, got %d", calls)
+	}
+}
+
+func TestCachedCall_StaleButWithinTTL_FallsBackOnError(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Write([]byte(`{"result":"cached_value","error":null}`))
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewRPCClientWithCache(srv.URL, "u", "p", 10*time.Millisecond, 5*time.Second)
+
+	r1, err := c.CachedCall("w1", "method")
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if string(r1) != `"cached_value"` {
+		t.Fatalf("expected cached_value, got %s", r1)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	// Refresh fails, but TTL hasn't expired — should return stale cache.
+	r2, err := c.CachedCall("w1", "method")
+	if err != nil {
+		t.Fatalf("expected no error with stale cache fallback, got: %v", err)
+	}
+	if string(r2) != `"cached_value"` {
+		t.Errorf("expected stale cached_value, got %s", r2)
+	}
+}
+
+func TestCachedCall_ExpiredTTL_ReturnsError(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Write([]byte(`{"result":"old","error":null}`))
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewRPCClientWithCache(srv.URL, "u", "p", 5*time.Millisecond, 10*time.Millisecond)
+
+	_, err := c.CachedCall("w1", "method")
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	// Both refresh and TTL expired, RPC fails — should return error.
+	_, err = c.CachedCall("w1", "method")
+	if err == nil {
+		t.Fatal("expected error when cache expired and RPC fails")
+	}
+}
+
+func TestCachedCall_DifferentKeysNotShared(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Write([]byte(fmt.Sprintf(`{"result":%d,"error":null}`, calls)))
+	}))
+	defer srv.Close()
+
+	c := NewRPCClientWithCache(srv.URL, "u", "p", 1*time.Second, 5*time.Second)
+
+	c.CachedCall("w1", "listunspent")
+	c.CachedCall("w2", "listunspent")
+	c.CachedCall("w1", "listtransactions")
+
+	if calls != 3 {
+		t.Errorf("expected 3 RPC calls for different keys, got %d", calls)
 	}
 }
